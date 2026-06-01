@@ -18,6 +18,16 @@ type Client struct {
 	TCPTimeout    int
 	UDPTimeout    int
 	Dst           string
+
+	// DialTCP and DialUDP, when set, are used instead of the package-level
+	// DialTCP/DialUDP functions to create the connection to the proxy and the
+	// UDP relay socket. This allows per-client control over how the underlying
+	// sockets are created (for example to set SO_MARK or SO_BINDTODEVICE, bind
+	// to a specific interface, or hand in an externally created socket) without
+	// the process-wide effect of overriding the package-level variables. When
+	// nil, the package-level functions are used.
+	DialTCP func(network, laddr, raddr string) (net.Conn, error)
+	DialUDP func(network, laddr, raddr string) (net.Conn, error)
 }
 
 // This is just create a client, you need to use Dial to create conn
@@ -47,6 +57,8 @@ func (c *Client) DialWithLocalAddr(network, src, dst string, remoteAddr net.Addr
 		UDPTimeout:    c.UDPTimeout,
 		Dst:           dst,
 		RemoteAddress: remoteAddr,
+		DialTCP:       c.DialTCP,
+		DialUDP:       c.DialUDP,
 	}
 	var err error
 	if network == "tcp" {
@@ -98,7 +110,11 @@ func (c *Client) DialWithLocalAddr(network, src, dst string, remoteAddr net.Addr
 		if err != nil {
 			return nil, err
 		}
-		c.UDPConn, err = DialUDP("udp", src, rp.Address())
+		dialUDP := DialUDP
+		if c.DialUDP != nil {
+			dialUDP = c.DialUDP
+		}
+		c.UDPConn, err = dialUDP("udp", src, rp.Address())
 		if err != nil {
 			return nil, err
 		}
@@ -202,7 +218,11 @@ func (c *Client) Negotiate(laddr net.Addr) error {
 		src = laddr.String()
 	}
 	var err error
-	c.TCPConn, err = DialTCP("tcp", src, c.Server)
+	dialTCP := DialTCP
+	if c.DialTCP != nil {
+		dialTCP = c.DialTCP
+	}
+	c.TCPConn, err = dialTCP("tcp", src, c.Server)
 	if err != nil {
 		return err
 	}
